@@ -1,4 +1,4 @@
-name: CDiT
+name: MS-CADM
 channels:
   - pytorch
   - nvidia
