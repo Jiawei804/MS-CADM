@@ -13,12 +13,12 @@ from diffusion.dataset import WindDataDataset, wind_data, wind_data_zone2, WindD
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
-from torchvision.utils import save_image
 from diffusion import create_diffusion
-from diffusers.models import AutoencoderKL
+from download import find_model
 from models import DiT_models
 import argparse
 from torch.utils.data import DataLoader
+
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -31,10 +31,6 @@ def main(args):
     torch.set_grad_enabled(False)
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    if args.ckpt is None:
-        assert args.model == "DiT-XL/1", "Only DiT-XL/1 models are available for auto-download."
-        assert args.image_size in [256, 512]
-        assert args.num_classes == 1000
 
     # Load model:
     model = DiT_models[args.model](
@@ -109,7 +105,6 @@ def main(args):
             y_null = torch.randn_like(y, device=device)
             _y = torch.cat([y, y_null], 0)
             model_kwargs = dict(exo_c=_y, cfg_scale=args.cfg_scale)
-            # model_kwargs = dict(y=_y, cfg_scale=args.cfg_scale)
             sample_fn = model.forward_with_cfg
 
 
@@ -133,8 +128,8 @@ def main(args):
     all_predictions = all_predictions.transpose(0, 2, 1) # shape: (num_samples, seq_len, sample_repeats)
     true_values = np.concatenate(true_values, axis=0)  # shape: (num_samples, seq_len)
     print(f"all_predictions.shape: {all_predictions.shape}, true_values.shape: {true_values.shape}")
-    np.save("pred_wind.npy", all_predictions)
-    np.save("true_wind.npy", true_values)
+    np.save("pred_wind_ab.npy", all_predictions)
+    np.save("true_new.npy", true_values)
     print(f"all_time: {all_time}")
 
 if __name__ == "__main__":

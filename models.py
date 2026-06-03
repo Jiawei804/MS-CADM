@@ -14,7 +14,7 @@ import torch.nn as nn
 import numpy as np
 import math
 from timm.models.vision_transformer import Attention, Mlp
-from diffusion.DiT_blocks import MultiHeadCrossAttention, FactorEmbedder, TimestepEmbedder, CalssEmbedder
+from diffusion.DiT_blocks import TimestepEmbedder
 import random
 
 def modulate(x, shift, scale):
@@ -29,13 +29,10 @@ class DiTBlock(nn.Module):
     """
     A DiT block with adaptive layer norm zero (adaLN-Zero) conditioning.
     """
-    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, cross_attn=True, **block_kwargs):
+    def __init__(self, hidden_size, num_heads, mlp_ratio=4.0, **block_kwargs):
         super().__init__()
-        self.cross_attn = cross_attn
         self.norm1 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.attn = Attention(hidden_size, num_heads=num_heads, qkv_bias=True, **block_kwargs)
-        if self.cross_attn:
-            self.cross_attn = MultiHeadCrossAttention(hidden_size, num_heads=num_heads, **block_kwargs)
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         mlp_hidden_dim = int(hidden_size * mlp_ratio)
         approx_gelu = lambda: nn.GELU(approximate="tanh")
@@ -45,12 +42,11 @@ class DiTBlock(nn.Module):
             nn.Linear(hidden_size, 6 * hidden_size, bias=True)
         )
 
-    def forward(self, x, c, y=None, mask=None):
+    def forward(self, x, c):
         shift_msa, scale_msa, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.adaLN_modulation(c).chunk(6, dim=1)
         x = x + gate_msa.unsqueeze(1) * self.attn(modulate(self.norm1(x), shift_msa, scale_msa))
         # print("DiTBlock ", x.shape, y.shape)
-        if y is not None and self.cross_attn:
-            x = x + self.cross_attn(x, y, mask=mask)  # y is the condition
+
         x = x + gate_mlp.unsqueeze(1) * self.mlp(modulate(self.norm2(x), shift_mlp, scale_mlp))
         return x
 
@@ -91,6 +87,41 @@ class PatchEmbed(nn.Module):
         x = self.proj(x).flatten(2).transpose(1, 2)
         return x
 
+
+class YOp(nn.Module):
+    def __init__(self, in_features):
+        super().__init__()
+        self.conv1 = nn.Conv1d(in_features, in_features, kernel_size=3, padding=3 // 2, groups=in_features)
+        self.conv2 = nn.Conv1d(in_features, in_features, kernel_size=5, padding=5 // 2, groups=in_features)
+        self.conv3 = nn.Conv1d(in_features, in_features, kernel_size=7, padding=7 // 2, groups=in_features)
+
+        self.projector = nn.Conv1d(in_features, in_features, kernel_size=1, )
+
+        self.initialize_weights()
+    def forward(self, x):
+        identity = x
+        conv1_x = self.conv1(x)
+        conv2_x = self.conv2(x)
+        conv3_x = self.conv3(x)
+
+        x = (conv1_x + conv2_x + conv3_x) / 3.0 + identity
+
+        identity = x
+
+        x = self.projector(x)
+
+        return identity + x
+
+    def initialize_weights(self):
+        nn.init.constant_(self.conv1.weight, 0)
+        nn.init.constant_(self.conv1.bias, 0)
+        nn.init.constant_(self.conv2.weight, 0)
+        nn.init.constant_(self.conv2.bias, 0)
+        nn.init.constant_(self.conv3.weight, 0)
+        nn.init.constant_(self.conv3.bias, 0)
+        nn.init.constant_(self.projector.weight, 0)
+        nn.init.constant_(self.projector.bias, 0)
+
 class YEmbed(nn.Module):
     """ 1D "image" to Patch Embedding
     """
@@ -104,7 +135,19 @@ class YEmbed(nn.Module):
 
         self.proj = nn.Conv1d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
 
-        self.register_buffer("y_embedding", nn.Parameter(torch.randn(in_chans, 24) / 24 ** 0.5))
+        self.proj1 = nn.Linear(embed_dim, 64)
+        self.yop = YOp(64)
+        self.proj2 = nn.Linear(64, embed_dim)
+
+        self.nonlinear = nn.GELU()
+        self.dropout = nn.Dropout(0.1)
+
+        self.norm = nn.LayerNorm(embed_dim)
+        self.gamma = nn.Parameter(torch.ones(embed_dim) * 1e-6)
+        self.gammax = nn.Parameter(torch.ones(embed_dim))
+        self.initialize_weights()
+
+        self.register_buffer("y_embedding", nn.Parameter(torch.randn(in_chans, sequence_size) / sequence_size ** 0.5))
 
     def token_drop(self, x, force_drop_ids=None):
         """
@@ -125,8 +168,25 @@ class YEmbed(nn.Module):
         if (train and use_dropout) or (force_drop_ids is not None):
             x = self.token_drop(x, force_drop_ids)
 
-        x = self.proj(x).flatten(2).transpose(1, 2)
-        return x
+
+        x = self.proj(x).transpose(1, 2)
+        identity = x
+        x = self.norm(x) * self.gamma + x * self.gammax
+        proj1 = self.proj1(x).transpose(1, 2)
+        proj1 = self.yop(proj1).transpose(1, 2)
+        nonlinear = self.nonlinear(proj1)
+        nonlinear = self.dropout(nonlinear)
+        proj2 = self.proj2(nonlinear)
+
+        return proj2 + identity
+
+    def initialize_weights(self):
+        nn.init.constant_(self.proj1.weight, 0)
+        nn.init.constant_(self.proj1.bias, 0)
+        nn.init.constant_(self.proj2.weight, 0)
+        nn.init.constant_(self.proj2.bias, 0)
+
+
 
 class DiT(nn.Module):
     """
@@ -144,10 +204,9 @@ class DiT(nn.Module):
         mlp_ratio=4.0,
         class_dropout_prob=0.1,
         learn_sigma=True,
-        cross_attn=True,
     ):
         super().__init__()
-        self.cross_attn = cross_attn
+
         self.learn_sigma = learn_sigma
         self.in_channels = in_channels
         self.out_channels = in_channels * 2 if learn_sigma else in_channels
@@ -159,17 +218,13 @@ class DiT(nn.Module):
 
         self.exo_embedder = YEmbed(input_size, patch_size, exo_channels, hidden_size, class_dropout_prob)
 
-        if cross_attn:
-            approx_gelu = lambda: nn.GELU(approximate="tanh")
-            # self.y_embedder = FactorEmbedder(exo_channels, hidden_size, class_dropout_prob, act_layer=approx_gelu, token_num=24)
-            self.y_embedder = FactorEmbedder(24, hidden_size, class_dropout_prob, act_layer=approx_gelu, token_num=exo_channels)
 
         num_patches = self.x_embedder.num_patches
         # Will use fixed sin-cos embedding:
         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches, hidden_size), requires_grad=False)
 
         self.blocks = nn.ModuleList([
-            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio, cross_attn=cross_attn) for _ in range(depth)
+            DiTBlock(hidden_size, num_heads, mlp_ratio=mlp_ratio) for _ in range(depth)
         ])
         self.final_layer = FinalLayer(hidden_size, patch_size, self.out_channels)
         self.initialize_weights()
@@ -197,15 +252,6 @@ class DiT(nn.Module):
         nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
         nn.init.constant_(self.exo_embedder.proj.bias, 0)
 
-        # Initialize factor embed like nn.Linear (instead of nn.Conv1d):
-        if self.cross_attn:
-            # nn.init.normal_(self.y_embedder.y_proj.fc1.weight, std=0.02)
-            # nn.init.normal_(self.y_embedder.y_proj.fc2.weight, std=0.02)
-
-            w = self.y_embedder.y_proj.weight.data
-            nn.init.xavier_uniform_(w.view([w.shape[0], -1]))
-            nn.init.constant_(self.y_embedder.y_proj.bias, 0)
-
         # Initialize timestep embedding MLP:
         nn.init.normal_(self.t_embedder.mlp[0].weight, std=0.02)
         nn.init.normal_(self.t_embedder.mlp[2].weight, std=0.02)
@@ -223,7 +269,7 @@ class DiT(nn.Module):
 
 
 
-    def forward(self, x, t, y=None, mask=None, exo_c=None):
+    def forward(self, x, t, exo_c=None):
         """
         Forward pass of DiT.
         x: (N, C, L) tensor of input Sequence
@@ -232,28 +278,14 @@ class DiT(nn.Module):
         """
         x = self.x_embedder(x) + self.pos_embed  # (N, T, D),
         t = self.t_embedder(t)                   # (N, D)
-        # month = self.month_embedder(month, self.training)    # (N, D)
-        # weekday = self.weekday_embedder(weekday, self.training)  # (N, D)
-        # c = t + month + weekday                           # (N, D)
         c = t
         exo_c = self.exo_embedder(exo_c, self.training) if exo_c is not None else 0
         x = x + exo_c
+        x += c.unsqueeze(1).repeat(1, x.shape[1], 1)  # (N, T, D)
 
 
-        # factors = self.fac_embedder(y, self.training)  # (N, D)
-        # # print(factors)
-        # factors = factors.unsqueeze(1).repeat(1, x.shape[1], 1)  # (N, T, D)
-        # x += factors
-
-        y_lens = None
-        if y is not None and self.cross_attn:
-            y = self.y_embedder(y, self.training)  # (N, L, D)
-
-            y_lens = [y.shape[1]] * y.shape[0]
-            y = y.contiguous().view(1, -1, x.shape[-1])  # (1, N*L, D)
-        # print(y.shape, y_lens)  # (1, 160, 384)
         for block in self.blocks:
-            x = block(x, c, y=y, mask=y_lens)                      # (N, T, D)
+            x = block(x, c)                      # (N, T, D)
 
         x = self.final_layer(x, c)                # (N, T, patch_size * out_channels)
         x = x.transpose(1, 2)                     # (N, patch_size * out_channels, T)
@@ -266,7 +298,7 @@ class DiT(nn.Module):
         # https://github.com/openai/glide-text2im/blob/main/notebooks/text2im.ipynb
         half = x[: len(x) // 2]
         combined = torch.cat([half, half], dim=0)
-        model_out = self.forward(combined, t, y=y, mask=mask, exo_c=exo_c)
+        model_out = self.forward(combined, t, exo_c=exo_c)
         # For exact reproducibility reasons, we apply classifier-free guidance on only
         # three channels by default. The standard approach to cfg applies it to all channels.
         # This can be done by uncommenting the following line and commenting-out the line following that.

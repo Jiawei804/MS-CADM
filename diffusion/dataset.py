@@ -74,6 +74,7 @@ def wind_data(path_name: str, random_state: int = 0, test_size:int=2*12*2):
 
     return [pd.concat([data_zone[i][j] for i in range(0, 9 + 1)], axis=0, join='inner') for j in range(0, 5 + 1)]
 
+
 class WindDataDataset(Dataset):
     def __init__(self, df_x, df_y, scaler=None, x_scaler=None):
         super().__init__()
@@ -96,12 +97,6 @@ class WindDataDataset(Dataset):
         print(self.df_x.shape, self.df_y.shape)
 
     def __getitem__(self, idx):
-        """
-        根据索引返回一个样本
-        :param idx: 样本索引
-        :return: 特征和标签
-        """
-
 
         data = torch.tensor(self.df_x[idx], dtype=torch.float32)  # 将特征转为 Tensor conditions
         y = torch.tensor(self.df_y[idx], dtype=torch.float32)  # 将标签转为 Tensor  target
@@ -223,45 +218,4 @@ class WindDataDataset_zone2(Dataset):
 
 if __name__ == '__main__':
 
-    # prepare data
-    data = wind_data(path_name="../scenarios/wind_data_all_zone.csv", test_size=50, random_state=0)
-
-    df_x_LS = data[0].copy()    # x 是标签
-    df_y_LS = data[1].copy()    # y 是特征
-
-    nb_days_LS = len(df_y_LS)
-    print(f"{df_x_LS.shape}, {df_y_LS.shape}")
-    print('all zones #LS %s days' % (nb_days_LS))
-
-    dataset = WindDataDataset(df_y_LS, df_x_LS)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-
-    count = 0
-    for data, y in dataloader:
-        print(data.shape)
-        # count += 1
-        # print(count)
-        print(y.shape)
-        break
-
-
-    # prepare data
-    data = wind_data_zone2(path_name="../scenarios/wind_zone2.csv", test_size=50, random_state=0)
-
-    df_x_LS = data[0].copy()    # x 是标签
-    df_y_LS = data[1].copy()    # y 是特征
-
-    nb_days_LS = len(df_y_LS)
-    print(f"{df_x_LS.shape}, {df_y_LS.shape}")
-    print('all zones #LS %s days' % (nb_days_LS))
-
-    dataset = WindDataDataset_zone2(df_y_LS, df_x_LS)
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
-
-    count = 0
-    for data, y in dataloader:
-        print(data.shape)
-        # count += 1
-        # print(count)
-        print(y.shape)
-        break
+    pass

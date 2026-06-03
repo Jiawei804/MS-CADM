@@ -59,7 +59,16 @@ python sample_ddp.py \
 
 If you use our code for your paper, please cite:
 ```
-
+@article{ZHANG2026112753,
+title = {Wind power scenario generation via multi-scale condition adaptive diffusion model},
+journal = {Electric Power Systems Research},
+volume = {255},
+pages = {112753},
+year = {2026},
+issn = {0378-7796},
+doi = {https://doi.org/10.1016/j.epsr.2026.112753},
+url = {https://www.sciencedirect.com/science/article/pii/S0378779626000465},
+author = {Jiawei Zhang and Shuhao Liu and Zeyi Shi and Yuancheng Li},
 ```
 
 ## Acknowledgements

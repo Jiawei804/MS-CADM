@@ -7,7 +7,6 @@ import math
 import torch
 
 from diffusion.dataset import wind_data, WindDataDataset, wind_data_zone2, WindDataDataset_zone2
-from utils.helps import plot_train_val_loss
 
 # the first flag below was False when we tested this script but True makes A100 training a lot faster:
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -178,8 +177,7 @@ def main(args):
     running_loss = 0
     start_time = time()
     train_loss_list = []
-    val_loss_list = []
-
+    ll_VS_min = float('inf')
     logger.info(f"Training for {args.epochs} epochs...  (max steps: {args.max_train_steps})")
     for epoch in range(args.epochs):
 
@@ -238,8 +236,8 @@ def main(args):
                         val_loss += loss.item()
                     logger.info(f"Validation Loss: {val_loss / len(val_loader):.4f}")
 
-                ll_VS_min = val_loss
-                if not math.isnan(val_loss) and val_loss <= ll_VS_min:
+
+                if not math.isnan(val_loss) and val_loss <= ll_VS_min and train_steps > 20000:
                     checkpoint = {
                         "model": model.state_dict(),
                         "ema": ema.state_dict(),
@@ -248,7 +246,8 @@ def main(args):
                     }
                     checkpoint_path = f"{checkpoint_dir}/best_model.pt"
                     torch.save(checkpoint, checkpoint_path)
-                val_loss_list.append(val_loss / len(test_loader))
+                    logger.info(f"Saved best model!!!")
+                    ll_VS_min = val_loss
                 model.eval()
             # Save DiT checkpoint:
             if train_steps % args.ckpt_every == 0 and train_steps > 0:
@@ -264,10 +263,6 @@ def main(args):
                 logger.info(f"Saved checkpoint to {checkpoint_path}")
 
 
-        # train_loss_list.append(train_loss / len(train_loader))
-
-
-    plot_train_val_loss(train_loss_list, val_loss_list)
 
     model.eval()  # important! This disables randomized embedding dropout
     # do any sampling/FID calculation/etc. with ema (or model) in eval mode ...
