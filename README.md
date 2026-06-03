@@ -2,11 +2,9 @@
 
 ---
 
-This repository implements a novel generative framework, **Conditional Diffusion Transformer (CDiT)**, designed for wind power scenario generation. The framework leverages the powerful generative capabilities of Diffusion Transformers to model the uncertainty and intermittency of wind power output, addressing the challenges posed by large-scale wind power integration into power systems.  
+This repository implements a novel generative framework, **Multi-scale Condition Adaptive Diffusion Model**, designed for wind power scenario generation. The framework leverages the powerful generative capabilities of Diffusion Transformers to model the uncertainty and intermittency of wind power output, addressing the challenges posed by large-scale wind power integration into power systems.  
 
-CDiT outperforms traditional deep learning generative models, such as Generative Adversarial Networks (GANs), Variational Autoencoders (VAEs), and Normalizing Flows, by utilizing a Transformer-based backbone for diffusion models. The framework is evaluated on the wind power dataset from the Global Energy Forecasting Competition 2014, demonstrating state-of-the-art performance in generating realistic and diverse wind power scenarios. 
-
-
+The framework is evaluated on the wind power dataset from the Global Energy Forecasting Competition 2014, demonstrating state-of-the-art performance in generating realistic and diverse wind power scenarios. 
 
 ![curve](./wind_scenario_generation.png)
 
