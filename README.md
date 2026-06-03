@@ -1,4 +1,4 @@
-# CDiT: Conditional Diffusion Transformer For Wind Power Scenario Generation
+# Wind power scenario generation via multi-scale condition adaptive diffusion model
 
 ---
 
@@ -15,16 +15,16 @@ The framework is evaluated on the wind power dataset from the Global Energy Fore
 ---
 
 ## Requirements
-To create and activate a suitable [conda](https://conda.io/) environment named `CDiT`, follow these steps:
+To create and activate a suitable [conda](https://conda.io/) environment named `MS-CADM`, follow these steps:
 
 ```
 conda env create -f environment.yaml
-conda activate CDiT
+conda activate MS-CADM
 ```
 
 ## Train
 
-To train CDiT on wind power scenario generation, run the following command:
+To train MS-CADM on wind power scenario generation, run the following command:
 
 ```sh
 python train.py \
@@ -40,7 +40,7 @@ python train.py \
 
 ## Scenario Generation
 
-To generate wind power scenarios using a trained CDiT model, run the following command:
+To generate wind power scenarios using a trained MS-CADM model, run the following command:
 
 ```sh
 python sample_ddp.py \
